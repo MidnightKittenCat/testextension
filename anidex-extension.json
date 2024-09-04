@@ -2,7 +2,7 @@
     "id": "anidex-torrent-provider",
     "name": "AniDex Torrent Provider",
     "description": "Anime torrent provider for AniDex",
-    "manifestURI": "",
+    "manifestURI": "https://raw.githubusercontent.com/MidnightKittenCat/testextension/main/anidex-extension.json",
     "version": "1.0.1",
     "author": "Your Name",
     "type": "anime-torrent-provider",
