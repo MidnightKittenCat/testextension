@@ -2,7 +2,7 @@
   "id": "anidex-torrent-provider",
   "name": "Anidex Anime Torrent Provider",
   "description": "Anime torrent provider extension for Anidex",
-  "manifestURI": "https://example.com/anidex-torrent-provider.json",
+  "manifestURI": "",
   "version": "1.0.0",
   "author": "Seanime Community",
   "type": "anime-torrent-provider",
