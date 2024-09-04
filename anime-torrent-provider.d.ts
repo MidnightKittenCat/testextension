@@ -1,139 +1,157 @@
-/// <reference path="./anime-torrent-provider.d.ts" />
+import { AnimeProvider, AnimeProviderSettings, AnimeTorrent, AnimeSearchOptions, AnimeSmartSearchOptions } from 'seanime';
 
-class Provider {
-    private api = "https://anidex.info";
+class AnidexProvider implements AnimeProvider {
+  api = 'https://anidex.info/api/';
 
-    async getSettings(): Promise<AnimeProviderSettings> {
-        return {
-            canSmartSearch: true,
-            smartSearchFilters: ["batch", "episodeNumber", "resolution", "query"],
-            supportsAdult: true,
-            type: "main",
-        };
+  getSettings(): AnimeProviderSettings {
+    return {
+      canSmartSearch: true,
+      smartSearchFilters: ['batch', 'episodeNumber', 'resolution'],
+      supportsAdult: true,
+      type: 'main',
+    };
+  }
+
+  async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {
+    const query = `?q=${encodeURIComponent(opts.query)}&category=1_2`;
+    const torrents = await this.fetchTorrents(query);
+    return torrents.map((t) => this.toAnimeTorrent(t));
+  }
+
+  async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {
+    const ret: AnimeTorrent[] = [];
+
+    if (opts.batch) {
+      if (!opts.anidbAID) return [];
+
+      let torrents = await this.searchByAID(opts.anidbAID, opts.resolution);
+
+      if (!(opts.media.format === 'MOVIE' || opts.media.episodeCount === 1)) {
+        torrents = torrents.filter((t) => t.num_files > 1);
+      }
+
+      for (const torrent of torrents) {
+        const t = this.toAnimeTorrent(torrent);
+        t.isBatch = true;
+        ret.push(t);
+      }
+
+      return ret;
     }
 
-    async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {
-        const url = `${this.api}/?q=${encodeURIComponent(opts.query)}`;
-        return this.fetchTorrents(url);
+    if (!opts.anidbEID) return [];
+
+    const torrents = await this.searchByEID(opts.anidbEID, opts.resolution);
+
+    for (const torrent of torrents) {
+      ret.push(this.toAnimeTorrent(torrent));
     }
 
-    async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {
-        let query = opts.query || opts.media.romajiTitle || opts.media.englishTitle;
-        if (opts.batch) query += " batch";
-        if (opts.episodeNumber > 0) query += ` episode ${opts.episodeNumber}`;
-        if (opts.resolution) query += ` ${opts.resolution}`;
+    return ret;
+  }
 
-        const url = `${this.api}/?q=${encodeURIComponent(query)}`;
-        return this.fetchTorrents(url);
-    }
+  async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {
+    return torrent.infoHash || '';
+  }
 
-    async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {
-        if (torrent.infoHash) return torrent.infoHash;
-        return this.scrapeTorrentPage(torrent.link, 'infoHash');
-    }
+  async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {
+    return torrent.magnetLink || '';
+  }
 
-    async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {
-        if (torrent.magnetLink) return torrent.magnetLink;
-        return this.scrapeTorrentPage(torrent.link, 'magnetLink');
-    }
+  async getLatest(): Promise<AnimeTorrent[]> {
+    const query = `?q=&category=1_2`;
+    const torrents = await this.fetchTorrents(query);
+    return torrents.map((t) => this.toAnimeTorrent(t));
+  }
 
-    async getLatest(): Promise<AnimeTorrent[]> {
-        const url = `${this.api}/?s=id&o=desc`;
-        return this.fetchTorrents(url);
-    }
+  async searchByAID(aid: number, quality: string): Promise<AnidexTorrent[]> {
+    const q = encodeURIComponent(this.formatCommonQuery(quality));
+    const query = `?q=${q}&anidb_aid=${aid}`;
+    return this.fetchTorrents(query);
+  }
 
-    private async fetchTorrents(url: string): Promise<AnimeTorrent[]> {
-        try {
-            const response = await fetch(url);
-            const html = await response.text();
-            return this.parseTorrents(html);
-        } catch (error) {
-            console.error("Error fetching torrents:", error);
-            return [];
+  async searchByEID(eid: number, quality: string): Promise<AnidexTorrent[]> {
+    const q = encodeURIComponent(this.formatCommonQuery(quality));
+    const query = `?q=${q}&anidb_eid=${eid}`;
+    return this.fetchTorrents(query);
+  }
+
+  async fetchTorrents(url: string): Promise<AnidexTorrent[]> {
+    const furl = `${this.api}${url}`;
+
+    try {
+      const response = await fetch(furl);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch torrents, ${response.statusText}`);
+      }
+
+      const torrents: AnidexTorrent[] = await response.json();
+
+      return torrents.map((t) => {
+        if (t.seeders > 30000) {
+          t.seeders = 0;
         }
-    }
-
-    private parseTorrents(html: string): AnimeTorrent[] {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const rows = doc.querySelectorAll('table.table-hover > tbody > tr');
-        
-        return Array.from(rows).map(row => {
-            const nameElement = row.querySelector('td:nth-child(3) a');
-            const name = nameElement?.textContent?.trim() || '';
-            const link = nameElement?.getAttribute('href') || '';
-            const size = row.querySelector('td:nth-child(7)')?.textContent?.trim() || '';
-            const seeders = parseInt(row.querySelector('td:nth-child(9)')?.textContent?.trim() || '0', 10);
-            const leechers = parseInt(row.querySelector('td:nth-child(10)')?.textContent?.trim() || '0', 10);
-            const downloadCount = parseInt(row.querySelector('td:nth-child(8)')?.textContent?.trim() || '0', 10);
-            const dateElement = row.querySelector('td:nth-child(5)');
-            const date = dateElement ? new Date(dateElement.getAttribute('title') || '').toISOString() : new Date().toISOString();
-
-            return {
-                name,
-                date,
-                size: this.parseSize(size),
-                formattedSize: size,
-                seeders,
-                leechers,
-                downloadCount,
-                link: `${this.api}${link}`,
-                downloadUrl: '',
-                magnetLink: null,
-                infoHash: null,
-                resolution: this.parseResolution(name),
-                isBatch: name.toLowerCase().includes('batch'),
-                episodeNumber: this.parseEpisodeNumber(name),
-                releaseGroup: this.parseReleaseGroup(name),
-                isBestRelease: false,
-                confirmed: false,
-            };
-        });
-    }
-
-    private parseSize(size: string): number {
-        const match = size.match(/^([\d.]+)\s*([KMGT]?B)$/i);
-        if (!match) return 0;
-        const [, value, unit] = match;
-        const multipliers: { [key: string]: number } = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
-        return parseFloat(value) * multipliers[unit.toUpperCase()];
-    }
-
-    private parseResolution(name: string): string {
-        const resolutions = ['4K', '1080p', '720p', '480p'];
-        for (const res of resolutions) {
-            if (name.includes(res)) return res;
+        if (t.leechers > 30000) {
+          t.leechers = 0;
         }
-        return '';
+        return t;
+      });
+    } catch (error) {
+      throw new Error(`Error fetching torrents: ${error}`);
+    }
+  }
+
+  formatCommonQuery(quality: string): string {
+    if (quality === '') {
+      return '';
     }
 
-    private parseEpisodeNumber(name: string): number {
-        const match = name.match(/\b(?:E|EP|Episode)\s*(\d+)\b/i);
-        return match ? parseInt(match[1], 10) : -1;
-    }
+    quality = quality.replace(/p$/, '');
 
-    private parseReleaseGroup(name: string): string {
-        const match = name.match(/\[([^\]]+)\]/);
-        return match ? match[1] : '';
-    }
+    const resolutions = ['480', '540', '720', '1080'];
 
-    private async scrapeTorrentPage(url: string, type: 'infoHash' | 'magnetLink'): Promise<string> {
-        try {
-            const response = await fetch(url);
-            const html = await response.text();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+    const others = resolutions.filter((r) => r !== quality);
+    const othersStrs = others.map((r) => `!"${r}"`);
 
-            if (type === 'infoHash') {
-                const infoHashElement = doc.querySelector('.info-hash');
-                return infoHashElement?.textContent?.trim() || '';
-            } else {
-                const magnetLink = doc.querySelector('a[href^="magnet:"]')?.getAttribute('href') || '';
-                return magnetLink;
-            }
-        } catch (error) {
-            console.error(`Error scraping ${type}:`, error);
-            return '';
-        }
-    }
+    return `("${quality}" ${othersStrs.join(' ')})`;
+  }
+
+  toAnimeTorrent(torrent: AnidexTorrent): AnimeTorrent {
+    return {
+      name: torrent.title,
+      date: new Date(torrent.timestamp * 1000).toISOString(),
+      size: torrent.total_size,
+      formattedSize: '',
+      seeders: torrent.seeders,
+      leechers: torrent.leechers,
+      downloadCount: torrent.torrent_download_count,
+      link: torrent.link,
+      downloadUrl: torrent.torrent_url,
+      magnetLink: torrent.magnet_uri,
+      infoHash: torrent.info_hash,
+      resolution: '',
+      isBatch: false,
+      isBestRelease: false,
+      confirmed: true,
+    };
+  }
 }
+
+type AnidexTorrent = {
+  id: number;
+  title: string;
+  link: string;
+  timestamp: number;
+  status: string;
+  anidb_aid: number;
+  anidb_eid: number;
+  torrent_url: string;
+  info_hash: string;
+  magnet_uri: string;
+  seeders: number;
+  leechers: number;
+  torrent_download_count: number;
+  total_size: number;
+  num_files: number;
+};
