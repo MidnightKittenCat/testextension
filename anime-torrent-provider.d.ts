@@ -1,123 +1,66 @@
-/// <reference path="./anime-torrent-provider.d.ts" />
+declare type AnimeProviderSmartSearchFilter = "batch" | "episodeNumber" | "resolution" | "query" | "bestReleases";
 
-class Provider {
-    private baseUrl = "https://anidex.info";
+declare type AnimeProviderType = "main" | "special";
 
-    async getSettings(): Promise<AnimeProviderSettings> {
-        return {
-            canSmartSearch: true,
-            smartSearchFilters: ["batch", "episodeNumber", "resolution", "query"],
-            supportsAdult: true,
-            type: "main",
-        };
-    }
+declare interface AnimeProviderSettings {
+    canSmartSearch: boolean;
+    smartSearchFilters: AnimeProviderSmartSearchFilter[];
+    supportsAdult: boolean;
+    type: AnimeProviderType;
+}
 
-    async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {
-        const url = `${this.baseUrl}/?q=${encodeURIComponent(opts.query)}`;
-        return this.fetchTorrents(url);
-    }
+declare interface Media {
+    id: number;
+    idMal?: number;
+    status?: string;
+    format?: string;
+    englishTitle?: string;
+    romajiTitle?: string;
+    episodeCount?: number;
+    absoluteSeasonOffset?: number;
+    synonyms: string[];
+    isAdult: boolean;
+    startDate?: FuzzyDate;
+}
 
-    async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {
-        let query = opts.query || opts.media.romajiTitle || opts.media.englishTitle;
-        if (opts.batch) query += " batch";
-        if (opts.episodeNumber > 0) query += ` ${opts.episodeNumber}`;
-        if (opts.resolution) query += ` ${opts.resolution}`;
+declare interface FuzzyDate {
+    year: number;
+    month?: number;
+    day?: number;
+}
 
-        const url = `${this.baseUrl}/?q=${encodeURIComponent(query)}`;
-        return this.fetchTorrents(url);
-    }
+declare interface AnimeSearchOptions {
+    media: Media;
+    query: string;
+}
 
-    async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {
-        if (torrent.infoHash) return torrent.infoHash;
-        
-        // Implement scraping logic here if needed
-        return "";
-    }
+declare interface AnimeSmartSearchOptions {
+    media: Media;
+    query: string;
+    batch: boolean;
+    episodeNumber: number;
+    resolution: string;
+    anidbAID: number;
+    anidbEID: number;
+    bestReleases: boolean;
+}
 
-    async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {
-        if (torrent.magnetLink) return torrent.magnetLink;
-        
-        // Implement scraping logic here if needed
-        return "";
-    }
-
-    async getLatest(): Promise<AnimeTorrent[]> {
-        const url = `${this.baseUrl}/?s=id&o=desc`;
-        return this.fetchTorrents(url);
-    }
-
-    private async fetchTorrents(url: string): Promise<AnimeTorrent[]> {
-        try {
-            const response = await fetch(url);
-            const html = await response.text();
-            return this.parseTorrents(html);
-        } catch (error) {
-            console.error("Error fetching torrents:", error);
-            return [];
-        }
-    }
-
-    private parseTorrents(html: string): AnimeTorrent[] {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        const rows = doc.querySelectorAll('table.table-hover > tbody > tr');
-        
-        return Array.from(rows).map(row => {
-            const nameElement = row.querySelector('td:nth-child(3) a');
-            const name = nameElement?.textContent?.trim() || '';
-            const link = nameElement?.getAttribute('href') || '';
-            const size = row.querySelector('td:nth-child(7)')?.textContent?.trim() || '';
-            const seeders = parseInt(row.querySelector('td:nth-child(9)')?.textContent?.trim() || '0', 10);
-            const leechers = parseInt(row.querySelector('td:nth-child(10)')?.textContent?.trim() || '0', 10);
-            const downloadCount = parseInt(row.querySelector('td:nth-child(8)')?.textContent?.trim() || '0', 10);
-            const dateElement = row.querySelector('td:nth-child(5)');
-            const date = dateElement ? new Date(dateElement.getAttribute('title') || '').toISOString() : new Date().toISOString();
-
-            return {
-                name,
-                date,
-                size: this.parseSize(size),
-                formattedSize: size,
-                seeders,
-                leechers,
-                downloadCount,
-                link: `${this.baseUrl}${link}`,
-                downloadUrl: '',
-                magnetLink: null,
-                infoHash: null,
-                resolution: this.parseResolution(name),
-                isBatch: name.toLowerCase().includes('batch'),
-                episodeNumber: this.parseEpisodeNumber(name),
-                releaseGroup: this.parseReleaseGroup(name),
-                isBestRelease: false,
-                confirmed: false,
-            };
-        });
-    }
-
-    private parseSize(size: string): number {
-        const match = size.match(/^([\d.]+)\s*([KMGT]?B)$/i);
-        if (!match) return 0;
-        const [, value, unit] = match;
-        const multipliers: { [key: string]: number } = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
-        return parseFloat(value) * multipliers[unit.toUpperCase()];
-    }
-
-    private parseResolution(name: string): string {
-        const resolutions = ['4K', '1080p', '720p', '480p'];
-        for (const res of resolutions) {
-            if (name.includes(res)) return res;
-        }
-        return '';
-    }
-
-    private parseEpisodeNumber(name: string): number {
-        const match = name.match(/\b(?:E|EP|Episode)\s*(\d+)\b/i);
-        return match ? parseInt(match[1], 10) : -1;
-    }
-
-    private parseReleaseGroup(name: string): string {
-        const match = name.match(/\[([^\]]+)\]/);
-        return match ? match[1] : '';
-    }
+declare interface AnimeTorrent {
+    name: string;
+    date: string;
+    size: number;
+    formattedSize: string;
+    seeders: number;
+    leechers: number;
+    downloadCount: number;
+    link: string;
+    downloadUrl?: string;
+    magnetLink?: string;
+    infoHash?: string;
+    resolution?: string;
+    isBatch?: boolean;
+    episodeNumber: number;
+    releaseGroup?: string;
+    isBestRelease: boolean;
+    confirmed: boolean;
 }
